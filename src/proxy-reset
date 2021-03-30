@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+if [ "$(id -u)" != "0" ]; then
+    echo -e "\nScript must run as root!\n"
+    exit 1
+fi
+
+echo "Removing existing rules if present..."
+/etc/init.d/redsocks stop > /dev/null 2>&1
+if ( iptables -t nat --list | grep REDSOCKS ) > /dev/null 2>&1; then
+    iptables -t nat -F > /dev/null 2>&1
+    iptables -t nat -X REDSOCKS > /dev/null 2>&1
+fi

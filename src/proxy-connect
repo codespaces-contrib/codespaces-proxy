@@ -1,0 +1,89 @@
+#!/bin/bash
+set -e
+PROXY_HOST=${1:-127.0.0.1}
+PROXY_PORT=${2:-1080}
+shift 2
+IPS_TO_PROXY=("${@:-all}")
+
+IPTABLES_TCP_PORT=17767
+IPTABLES_UDP_PORT=17668
+IPTABLES_DNS_PORT=17669
+
+if [ "$(id -u)" != "0" ]; then
+    echo -e "\nScript must run as root!\n"
+    exit 1
+fi
+
+# Check for dependencies and install if missing - TODO: support Alpine, Redhat containers
+if ! dpkg -s iptables redsocks > /dev/null 2>&1; then
+    echo 'Installing needed depdendencies...'
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y iptables redsocks
+else 
+    # Otherwise stop redsocks and remove any existing rules
+    /etc/init.d/redsocks stop > /dev/null 2>&1
+    if ( iptables -t nat --list | grep REDSOCKS ) > /dev/null 2>&1; then
+        echo "Removing existing redsocks routing rules..."
+        iptables -t nat -F > /dev/null 2>&1
+        iptables -t nat -X REDSOCKS > /dev/null 2>&1
+    fi
+fi
+
+echo -e "\nSetting SOCKS proxy to ${PROXY_HOST}:${PROXY_PORT}..."
+iptables -t nat -N REDSOCKS
+iptables -t nat -A REDSOCKS -d "${PROXY_HOST}" -j RETURN
+
+# In "all" mode, everything but key things should be re-routed through the proxy
+if [ "${IPS_TO_PROXY[0]}" = "all" ]; then
+    # If running in host mode, check the docker0 adapter
+    DOCKER_IP_RANGE=$(ip address | awk '/docker[0-9]/,/inet/brd {print $2}' | awk 'NR==2')
+    if [ "${DOCKER_IP_RANGE}" = "" ]; then
+        # Look at the 172.17 range if no docker adapter exists
+        DOCKER_IP_RANGE=$(ip address | awk '/inet 172.17.0./ {print $2}')
+    fi
+    if [ "${DDOCKER_IP_RANGE}" != "" ]; then
+        iptables -t nat -A REDSOCKS -d ${DOCKER_IP_RANGE} -j RETURN
+    fi
+    if ping -c 1 host.docker.internal > /dev/null 2>&1; then
+        iptables -t nat -A REDSOCKS -d host.docker.internal -j RETURN
+    fi
+
+    # Make sure the local IP range is skips REDSOCKS proxy
+    ETH0_IP_RANGE=$(ip address | awk '/eth0/,/inet/brd {print $2}' | awk 'NR==2')
+    iptables -t nat -A REDSOCKS -d "${ETH0_IP_RANGE}" -j RETURN
+
+    # [Optional] Skip internal network ranges
+    #iptables -t nat -A REDSOCKS -d 10.0.0.0/8 -j RETURN
+    #iptables -t nat -A REDSOCKS -d 192.168.0.0/16 -j RETURN
+    #iptables -t nat -A REDSOCKS -d 172.16.0.0/12 -j RETURN
+
+    # See here for info about special IP ranges that are set to skip the proxy: https://tools.ietf.org/html/rfc5735
+    iptables -t nat -A REDSOCKS -d 0.0.0.0/8 -j RETURN
+    iptables -t nat -A REDSOCKS -d 127.0.0.0/8 -j RETURN
+    iptables -t nat -A REDSOCKS -d 169.254.0.0/16 -j RETURN
+    iptables -t nat -A REDSOCKS -d 224.0.0.0/4 -j RETURN
+    iptables -t nat -A REDSOCKS -d 240.0.0.0/4 -j RETURN
+    iptables -t nat -A REDSOCKS -p tcp -j REDIRECT --to-ports ${IPTABLES_TCP_PORT}
+    #iptables -t nat -A REDSOCKS -p udp -j REDIRECT --to-ports ${IPTABLES_UDP_PORT}
+else
+    # Otherwise just forward the specific range specified
+    for range in ${IPS_TO_PROXY[@]}; do
+        iptables -t nat -A REDSOCKS -p tcp -d $range -j REDIRECT --to-ports ${IPTABLES_TCP_PORT}
+        #iptables -t nat -A REDSOCKS -p udp -d $range -j REDIRECT --to-ports ${IPTABLES_UDP_PORT}
+    done
+fi
+
+# Setup proxy
+iptables -t nat -A PREROUTING -p tcp --dport 1:65535 -j REDSOCKS
+iptables -t nat -A OUTPUT -p tcp --dport 1:65535 -j REDSOCKS
+#iptables -t nat -A PREROUTING -p udp --dport 1:65535 -j REDSOCKS
+#iptables -t nat -A OUTPUT -p udp --dport 1:65535 -j REDSOCKS
+
+cp -f /etc/redsocks.conf.orig /etc/redsocks.conf
+sed -i "s/host.docker.internal/${PROXY_HOST}/g" /etc/redsocks.conf
+sed -i "s/1080/${PROXY_PORT}/g" /etc/redsocks.conf
+sed -i "s/17667/${IPTABLES_TCP_PORT}/g" /etc/redsocks.conf
+sed -i "s/17668/${IPTABLES_UDP_PORT}/g" /etc/redsocks.conf
+sed -i "s/17669/${IPTABLES_DNS_PORT}/g" /etc/redsocks.conf
+/etc/init.d/redsocks start

@@ -1,0 +1,1 @@
+@powershell "%~dp0\ssh-proxy.ps1" %*

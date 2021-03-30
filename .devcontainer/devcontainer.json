@@ -1,0 +1,17 @@
+{
+	"name": "Codespaces Proxy Example",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": { "VARIANT": "buster" }
+	},
+	// Just adding capabilities doesn't work in Codespaces currently
+	// "runArgs": [ "--cap-add=NET_ADMIN", "--cap-add=NET_RAW" ],
+	"runArgs": [ "--init", "--privileged" ],
+	"settings": { 
+		"terminal.integrated.shell.linux": "/bin/bash"
+	},
+	"extensions": [],
+	"forwardPorts": [2222],
+	"overrideCommand": false,
+	"remoteUser": "vscode"
+}

@@ -1,0 +1,43 @@
+#!/bin/bash
+set -e
+cd $(dirname $0)
+
+REMOTE_USERNAME=${1:-vscode}
+SSH_PORT=${2:-2222}
+SSH_HOST=${3:-127.0.0.1}
+LOCAL_PROXY_PORT=${4:-4040}
+REMOTE_PROXY_PORT=${5:-1080}
+
+if [ -f "ips-to-proxy.conf" ]; then
+    IP_RANGES_TO_PROXY="$(cat ips-to-proxy.conf | tr '\n' ' ')"
+else
+    IP_RANGES_TO_PROXY="all"
+fi
+
+if [ "$(docker ps -q -f 'name=codespaces-local-proxy-server')" != "" ]; then
+    docker rm --force codespaces-local-proxy-server > /dev/null
+fi
+
+cd src/proxy
+echo 'Building proxy image...'
+docker build --build-arg "DANTED_PORT=${LOCAL_PROXY_PORT}" -t codespaces-local-proxy-server .
+echo 'Starting proxy...'
+docker run -d --rm --name codespaces-local-proxy-server -p 127.0.0.1:${LOCAL_PROXY_PORT}:${LOCAL_PROXY_PORT} -p 127.0.0.1:${LOCAL_PROXY_PORT}:${LOCAL_PROXY_PORT}/udp codespaces-local-proxy-server
+cd ..
+
+echo 'Wiring up codespace...'
+ssh -tt -R 127.0.0.1:${REMOTE_PROXY_PORT}:127.0.0.1:${LOCAL_PROXY_PORT} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${REMOTE_USERNAME}@${SSH_HOST} bash -s << EOF
+cat << 'SCRIPTEOF' | sudo tee /etc/redsocks.conf.orig > /dev/null
+$(cat redsocks.conf)
+SCRIPTEOF
+cat << 'SCRIPTEOF' | sudo tee /usr/local/bin/proxy-connect > /dev/null
+$(cat proxy-connect)
+SCRIPTEOF
+cat << 'SCRIPTEOF' | sudo tee /usr/local/bin/proxy-reset > /dev/null
+$(cat proxy-reset)
+SCRIPTEOF
+clear && sudo proxy-connect 127.0.0.1 ${REMOTE_PROXY_PORT} ${IP_RANGES_TO_PROXY} && echo -e "\nPress Ctrl+C to disconnect!" && sleep infinity
+EOF
+
+echo -e '\nShutting down local proxy...'
+docker stop codespaces-local-proxy-server > /dev/null
