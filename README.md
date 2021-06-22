@@ -4,7 +4,7 @@ This demonstrates how to use SSH and a local Docker container with a SOCKS proxy
 
 > **Note:** This is a proof of concept rather than an offical implementation. Any offical implementation here would be more transparent than this illustrates.
 >
-> In addition, DNS or UDP forwarding wired in yet, though this is possible.
+> In addition, DNS or UDP forwarding are not wired in yet, though this is possible.
 
 ## Usage
 
