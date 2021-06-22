@@ -2,7 +2,7 @@
 
 This demonstrates how to use SSH and a local Docker container with a SOCKS proxy in it to allow a Codespace to access IPs on your local network.
 
-> **Note:** This is a proof of concept rather than an offical implementation. Any offical implementatioon here would be more transparent than this illustrates.
+> **Note:** This is a proof of concept rather than an offical implementation. Any offical implementation here would be more transparent than this illustrates.
 >
 > In addition, DNS or UDP forwarding wired in yet, though this is possible.
 
